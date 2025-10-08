@@ -1,0 +1,4 @@
+/memoria/
+
+# Archivos de memoria binaria (por si acaso)
+*.bin
