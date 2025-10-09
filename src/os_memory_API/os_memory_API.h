@@ -1,9 +1,16 @@
 #pragma once
 #include "../osm_File/osm_File.h"
 
+typedef struct {
+    uint8_t estado;         // 1 byte: 0x01 existe, 0x00 libre
+    char nombre[15];        // 14 bytes + '\0' para uso local
+    uint8_t id;             // 1 byte
+    uint8_t tabla_archivos[240]; // 240 bytes para la tabla de archivos
+} PCBEntry;
+
 /* ====== FUNCIONES GENERALES ====== */
 
-// void mount_memory(char* memory_path);
+void mount_memory(char* memory_path);
 
 // void list_processes();
 
@@ -17,7 +24,7 @@
 
 /* ====== FUNCIONES PARA PROCESOS ====== */
 
-// int start_process(int process_id, char* process_name);
+int start_process(int process_id, char* process_name);
 
 // int finish_process(int process_id);
 
