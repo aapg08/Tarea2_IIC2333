@@ -112,4 +112,135 @@ int start_process(int process_id, char* process_name) {
     return -1; // Caso Error: No hay espacio para más procesos
 }
 
+int finish_process(int process_id) {
+    FILE* file = fopen(memory_path, "rb+");
+    // Buscar el PCB del proceso
+    for (int i=0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        PCBEntry pcb;
+        fread(&pcb, sizeof(PCBEntry), 1, file);
+
+        if (pcb.estado == 0x01 && pcb.id == process_id) {
+            pcb.estado = 0x00; // Marcar como libre
+            fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+            fwrite(&pcb, sizeof(PCBEntry), 1, file);
+            fclose(file);
+            return 0; // Caso Éxito
+        }
+    }
+    // Falta liberar frames y archivos asociados al proceso
+
+    fclose(file);
+    return -1; // Caso Error
+}
+
+int clear_all_processes() {
+    FILE* file = fopen(memory_path, "rb+");
+    int terminados = 0;
+    PCBEntry pcb;
+
+    for (int i=0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        fread(&pcb, sizeof(PCBEntry), 1, file);
+
+        if (pcb.estado == 0x01) {
+            pcb.estado = 0x00; // Marcar como libre
+            fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+            fwrite(&pcb, sizeof(PCBEntry), 1, file);
+            terminados++;
+        }
+    }
+    // Falta liberar frames y archivos asociados a los procesos
+
+    fclose(file);
+    return terminados;
+}
+
 // // funciones archivos
+
+osmFile* open_file(int process_id, char* file_name, char mode) {
+    FILE* file = fopen(memory_path, "rb+");
+    // Buscar el PCB del proceso
+    PCBEntry pcb;
+    int pcb_index = -1;
+    for (int i=0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        fread(&pcb, sizeof(PCBEntry), 1, file);
+        if (pcb.estado == 0x01 && pcb.id == process_id) {
+            pcb_index = i;
+            break;
+        }
+    }
+    if (pcb_index == -1) {
+        fclose(file);
+        return NULL; // Proceso no encontrado
+    }
+
+    // Recorremos la tabla de archivos del PCB
+    for (int j=0; j < FILE_TABLE_ENTRIES; j++) {
+        int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24; // 16 bytes de estado, nombre e id
+        fseek(file, entry_offset, SEEK_SET);
+        uint8_t valid;
+        char name[15];
+        fread(&valid, 1, 1, file);
+        fread(name, 1, 14, file);
+        name[14] = '\0';
+        if (mode == 'r') {
+            if (valid == 0x01 && strncmp(name, file_name, 14) == 0) {
+                // Archivo encontrado
+                osmFile* of = malloc(sizeof(osmFile));
+                of->valid = valid;
+                strncpy(of->name, name, 15);
+                fread(&(of->size), 5, 1, file);
+                fread(&(of->virtual_addr), 4, 1, file);
+                of->process_id = process_id;
+                of->mode = mode;
+                fclose(file);
+                return of;
+            }
+        } else if (mode == 'w') {
+            if (valid == 0x01 && strncmp(name, file_name, 14) == 0) {
+                // Archivo ya existe
+                fclose(file);
+                return NULL;
+            }
+        }
+
+        if (mode == 'w') {
+            // Buscar un espacio libre para crear el archivo
+            for (int j=0; j < FILE_TABLE_ENTRIES; j++) {
+                int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24;
+                fseek(file, entry_offset, SEEK_SET);
+                uint8_t valid;
+                fread(&valid, 1, 1, file);
+                if (valid == 0x00) {
+                    // Espacio libre encontrado, crear osmFile
+                    osmFile* of = malloc(sizeof(osmFile));
+                    of->valid = 0x01;
+                    strncpy(of->name, file_name, 14);
+                    of->name[14] = '\0';
+                    of->size = 0;
+                    of->virtual_addr = 0; // Asignar dirección virtual adecuada
+                    of->process_id = process_id;
+                    of->mode = mode;
+
+                    // Escribir en la tabla de archivos
+                    fseek(file, entry_offset, SEEK_SET);
+                    fwrite(&(of->valid), 1, 1, file);
+                    fwrite(of->name, 1, 14, file);
+                    fwrite(&(of->size), 5, 1, file);
+                    fwrite(&(of->virtual_addr), 4, 1, file);
+
+                    fclose(file);
+                    return of;
+                }
+            }
+        }
+        fclose(file);
+        return NULL; // No hay espacio en la tabla de archivos
+    }
+    
+    
+
+
+}

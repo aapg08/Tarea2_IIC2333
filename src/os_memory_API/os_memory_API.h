@@ -26,16 +26,16 @@ void mount_memory(char* memory_path);
 
 int start_process(int process_id, char* process_name);
 
-// int finish_process(int process_id);
+int finish_process(int process_id);
 
-// int clear_all_processes();
+int clear_all_processes();
 
 // int file_table_slots(int process_id);
 
 
 /* ====== FUNCIONES PARA ARCHIVOS ====== */
 
-// osmFile* open_file(int process_id, char* file_name, char mode);
+osmFile* open_file(int process_id, char* file_name, char mode);
 
 // int read_file(osmFile* file desc, char* dest);
 
