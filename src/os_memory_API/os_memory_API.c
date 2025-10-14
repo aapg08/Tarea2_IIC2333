@@ -406,7 +406,7 @@ osmFile* open_file(int process_id, char* file_name, char mode) {
                 strncpy(of->name, file_name, 14);
                 of->name[14] = '\0';
                 of->size = 0;
-                of->virtual_addr = 0; // Asignar dirección virtual adecuada
+                of->virtual_addr = buscar_espacio_libre_virtual(process_id); // Asignar dirección virtual adecuada
                 of->process_id = process_id;
                 of->mode = mode;
 
@@ -456,11 +456,6 @@ int read_file(osmFile* file_desc, char* dest) {
         vaddr += bytes_a_leer;
     }
 
-    // // Calcular el offset en el archivo de memoria
-    // long offset = DATA_OFFSET + file_desc->virtual_addr;
-    // fseek(file, offset, SEEK_SET);
-    // // Leer los datos
-    // size_t bytes_leidos = fread(dest, 1, file_desc->size, file);
     fclose(file);
     return (int)total_leidos;
 
@@ -470,14 +465,64 @@ int write_file(osmFile* file_desc, char* src) {
     FILE* file = fopen(memory_path, "rb+");
     uint32_t vaddr = file_desc->virtual_addr;
     uint64_t size = file_desc->size;
+    printf("size %lu\n", size);
     int pid = file_desc->process_id;
     size_t total_escritos = 0;
 
     while (total_escritos < size) {
+        // Verificar espacio virtual contiguo libre
+        int pcb_index = -1;
+        PCBEntry pcb;
+        for (int i = 0; i < PCB_ENTRIES; i++) {
+            fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+            fread(&pcb, sizeof(PCBEntry), 1, file);
+            if (pcb.estado == 0x01 && pcb.id == pid) {
+                pcb_index = i;
+                break;
+            }
+        }
+        printf("pcb_index=%d\n", pcb_index);
+        int solapado = 0;
+        for (int j = 0; j < FILE_TABLE_ENTRIES; j++) {
+            int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24;
+            fseek(file, entry_offset, SEEK_SET);
+            uint8_t valid;
+            char name[15];
+            fread(&valid, 1, 1, file);
+            fread(name, 1, 14, file);
+            name[14] = '\0';
+            uint64_t other_size;
+            uint32_t other_vaddr;
+            fread(&other_size, 5, 1, file);
+            fread(&other_vaddr, 4, 1, file);
+            if (valid == 0x01 && strncmp(name, file_desc->name, 14) != 0) {
+                uint32_t start = other_vaddr;
+                uint32_t end = other_vaddr + (uint32_t)other_size;
+                uint32_t this_start = vaddr;
+                uint32_t this_end = vaddr + (size - total_escritos);
+                if (!(this_end <= start || this_start >= end)) {
+                    // Hay solapamiento
+                    printf("Solapamiento detectado: otro archivo [%s] ocupa vaddr %u-%u\n", name, start, end);
+                    solapado = 1;
+                    // Limitar la escritura hasta el inicio del archivo siguiente
+                    size_t max_escribir = start > this_start ? start - this_start : 0;
+                    printf("max_escribir=%zu\n", max_escribir);
+                    if (max_escribir == 0) {
+                        fclose(file);
+                        return (int)total_escritos;
+                    }
+                    size = total_escritos + max_escribir;
+                    break;
+                }
+            }
+        }
+
         printf("write_file: total_escritos=%zu, size=%lu, vaddr=%u\n", total_escritos, size, vaddr);
+        printf("hasta acá\n");
         uint32_t vpn = (vaddr >> 15) & 0xFFF; // 12 bits de VPN
         uint32_t offset = vaddr % PAGE_SIZE; // 15 bits de offset
         int pfn = buscar_pfn_en_IPT(pid, vpn);
+        printf("salto\n");
 
         // Si no existe la página, asignar un frame libre
         if (pfn < 0) {
@@ -592,8 +637,13 @@ void delete_file(int process_id, char* file_name) {
         
         if (valid == 0x01 && strncmp(name, file_name, 14) == 0) {
             valid = 0x00; // Marcar como inválido
+            uint64_t size = 0;
+            uint32_t vaddr = 0;
             fseek(file, entry_offset, SEEK_SET);
             fwrite(&valid, 1, 1, file);
+            fwrite(name, 1, 14, file); // Mantener el nombre por si se revisa
+            fwrite(&size, 5, 1, file);
+            fwrite(&vaddr, 4, 1, file);
             // Falta liberar frames asociados al archivo
             break;
         }
@@ -609,14 +659,21 @@ void close_file(osmFile* file_desc) {
 // funciones extra ----------------------------------------------------------------------------
 
 int buscar_pfn_en_IPT(int process_id, int vpn) {
+    printf("entre a la funcion nueva\n");
     FILE* file = fopen(memory_path, "rb+");
     fseek(file, IPT_OFFSET, SEEK_SET);
-    for (uint16_t pfn=0; pfn < TOTAL_FRAMES; pfn++) {
+    for (int pfn=0; pfn < TOTAL_FRAMES; pfn++) {
         long entry_offset = IPT_OFFSET + pfn * 3;
         fseek(file, entry_offset, SEEK_SET);
 
         uint8_t bytes[3];
-        fread(bytes, 1, 3, file);
+        size_t leidos = fread(bytes, 1, 3, file);
+        if (leidos != 3) {
+            printf("Error: fread no pudo leer 3 bytes en pfn=%u\n", pfn);
+            break;
+        }
+
+        if (pfn % 1000 == 0) printf("pfn=%u\n", pfn);
 
         int valid = (bytes[0] & 0x80) >> 7; // bit más significativo
         int pid_entry = ((bytes[0] & 0x3F) << 4) | ((bytes[1] & 0xF0) >> 4);
@@ -624,9 +681,101 @@ int buscar_pfn_en_IPT(int process_id, int vpn) {
 
         if (valid && pid_entry == process_id && vpn_entry == vpn) {
             fclose(file);
+            printf("sali de la funcion nueva con pfn encontrado\n");
             return pfn; // Encontrado
         }
     }
     fclose(file);
+    printf("sali de la funcion nueva sin pfn encontrado\n");
     return -1; // No encontrado
+}
+
+// Busca el primer espacio libre en la memoria virtual del proceso
+uint32_t buscar_espacio_libre_virtual(int process_id) {
+    FILE* file = fopen(memory_path, "rb+");
+    int pcb_index = -1;
+    PCBEntry pcb;
+    // Buscar el PCB del proceso
+    for (int i = 0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        fread(&pcb, sizeof(PCBEntry), 1, file);
+        if (pcb.estado == 0x01 && pcb.id == process_id) {
+            pcb_index = i;
+            break;
+        }
+    }
+    if (pcb_index == -1) {
+        fclose(file);
+        return 0; // Proceso no encontrado, por defecto 0
+    }
+
+    // Guardar los rangos ocupados por archivos
+    uint32_t ocupados[FILE_TABLE_ENTRIES][2]; // [inicio, fin]
+    int count = 0;
+    for (int j = 0; j < FILE_TABLE_ENTRIES; j++) {
+        int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24;
+        fseek(file, entry_offset, SEEK_SET);
+        uint8_t valid;
+        fread(&valid, 1, 1, file);
+        if (valid == 0x01) {
+            char name[15];
+            fread(name, 1, 14, file);
+            uint64_t size;
+            uint32_t vaddr;
+            fread(&size, 5, 1, file);
+            fread(&vaddr, 4, 1, file);
+            ocupados[count][0] = vaddr;
+            ocupados[count][1] = vaddr + (uint32_t)size;
+            count++;
+        }
+    }
+    fclose(file);
+
+    // Buscar el primer espacio libre
+    uint32_t actual = 0;
+    const uint32_t LIMITE = VIRTUAL_SPACE_SIZE;
+    while (actual < LIMITE) {
+        int ocupado = 0;
+        for (int k = 0; k < count; k++) {
+            if (actual >= ocupados[k][0] && actual < ocupados[k][1]) {
+                ocupado = 1;
+                actual = ocupados[k][1]; // Saltar al final del archivo ocupado
+                break;
+            }
+        }
+        if (!ocupado) {
+            return actual;
+        }
+    }
+    return 0; // Si no hay espacio, retorna 0
+}
+
+void debug_print_pcbs() {
+    FILE* file = fopen(memory_path, "rb+");
+    PCBEntry pcb;
+    printf("---- Estado PCB ----\n");
+    for (int i = 0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        fread(&pcb, sizeof(PCBEntry), 1, file);
+        printf("PCB[%d]: estado=%02X, id=%d, nombre=%s\n", i, pcb.estado, pcb.id, pcb.nombre);
+        // Opcional: imprimir tabla de archivos
+        for (int j = 0; j < FILE_TABLE_ENTRIES; j++) {
+            uint8_t valid;
+            char name[15];
+            uint64_t size;
+            uint32_t vaddr;
+            int entry_offset = PCB_OFFSET + i * PCB_ENTRY_SIZE + 16 + j * 24;
+            fseek(file, entry_offset, SEEK_SET);
+            fread(&valid, 1, 1, file);
+            fread(name, 1, 14, file);
+            name[14] = '\0';
+            fread(&size, 5, 1, file);
+            fread(&vaddr, 4, 1, file);
+            if (valid == 0x01) {
+                printf("  Archivo[%d]: %s, size=%lu, vaddr=%u\n", j, name, size, vaddr);
+            }
+        }
+    }
+    fclose(file);
+    printf("--------------------\n");
 }

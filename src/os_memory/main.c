@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "../os_memory_API/os_memory_API.h"
 
 int main(int argc, char const *argv[]) {
@@ -10,13 +11,16 @@ int main(int argc, char const *argv[]) {
   
   // Montar la memoria
   mount_memory((char *)argv[1]);
-  
-  // Aquí puedes agregar más funciones de prueba
+
+  clear_all_processes();
   printf("Antes de start_process\n");
+  // debug_print_pcbs();
   start_process(10, "ventas"); // Crea proceso 10
   printf("Antes de start_process\n");
+  // debug_print_pcbs();
   start_process(20, "reportes"); // Crea proceso 20
   printf("Antes de list_process\n");
+  // debug_print_pcbs();
   list_processes(); // Lista procesos
 
   printf("Antes de process_slots\n");
@@ -42,6 +46,7 @@ int main(int argc, char const *argv[]) {
   // Simula escribir datos: crea un buffer con datos
   char datos[100] = "Este es un log de ventas.";
   f->size = 100; // Simula tamaño a escribir
+  debug_print_pcbs();
   printf("Antes de write_file\n");
   write_file(f, datos); // Escribe datos
   printf("Después de write_file\n");
@@ -58,6 +63,12 @@ int main(int argc, char const *argv[]) {
   printf("Antes de read_file\n");
   read_file(f, copia); // Copia a buffer local
   printf("Contenido leído: %s\n", copia);
+  // Verificación automática
+  if (strcmp(copia, "Este es un log de ventas.") == 0) {
+    printf("[OK] El contenido leído es correcto.\n");
+  } else {
+    printf("[ERROR] El contenido leído NO coincide con lo esperado.\n");
+  }
   printf("Antes de close_file\n");
   close_file(f);
   printf("Antes de list_files\n");

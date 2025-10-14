@@ -53,3 +53,7 @@ void close_file(osmFile* file_desc);
 /*====== EXTRA =====*/
 
 int buscar_pfn_en_IPT(int process_id, int vpn);
+
+uint32_t buscar_espacio_libre_virtual(int process_id);
+
+void debug_print_pcbs();
