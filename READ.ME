@@ -1,0 +1,71 @@
+# Tarea 2 - Memoria
+
+## Descripción General
+Esta tarea implementa una simulación de memoria principal, permitiendo montar una memoria, cargar procesos y gestionar archivos dentro de ella. El objetivo es replicar el comportamiento de una memoria virtual, respetando las restricciones de tamaño, direcciones virtuales y físicas, y las estructuras de datos asociadas (como tablas de procesos y archivos).
+
+El proyecto está dividido en módulos que manejan las funcionalidades generales, la gestión de procesos y la manipulación de archivos. Además, se incluyen funciones auxiliares para depuración y pruebas.
+
+## Funcionalidades Implementadas
+### Funciones Generales
+- **Montar memoria**: Permite cargar un archivo binario que simula la memoria principal.
+- **Estado del sistema**: Incluye funciones para listar procesos, archivos y el estado del bitmap de marcos.
+
+### Gestión de Procesos
+- **Crear procesos**: Crea un nuevo proceso, asignándole un ID único y una tabla de archivos vacía.
+- **Finalizar procesos**: Libera los recursos asociados a un proceso, incluyendo sus archivos y marcos de memoria.
+- **Limpiar todos los procesos**: Finaliza todos los procesos activos y reinicia el estado de la memoria.
+
+### Gestión de Archivos
+- **Abrir/crear archivos**: Permite abrir un archivo existente o crear uno nuevo asociado a un proceso.
+- **Leer archivos**: Copia el contenido de un archivo desde la memoria a un archivo local.
+- **Escribir archivos**: Escribe datos desde un archivo local a la memoria.
+- **Eliminar archivos**: Marca un archivo como inválido y libera los recursos asociados.
+
+### Funciones Auxiliares
+- **Depuración**: Funciones para imprimir el estado de las estructuras internas, como la tabla de procesos y el bitmap de marcos.
+- **Pruebas**: Múltiples `main` de prueba para validar las funcionalidades implementadas.
+
+## Estructura del Proyecto
+```
+Tarea2_IIC2333/
+├── Makefile
+├── src/
+│   ├── memorias/
+│   ├── main_tests/
+│   │   ├── main_test_basic.c
+│   │   ├── main_test_complete.c
+│   │   ├── main_test_files.c
+│   │   ├── main_test_processes.c
+│   ├── os_memory/
+│   │   ├── main.c
+│   ├── os_memory_API/
+│   │   ├── os_memory_API.c
+│   │   ├── os_memory_API.h
+│   │   ├── os_memory_constants.h
+│   │   ├── os_memory_utils.c
+│   │   ├── os_memory_utils.h
+│   ├── osm_File/
+│       ├── osm_File.c
+│       ├── osm_File.h
+```
+
+## Instrucciones para Compilar y Ejecutar
+1. **Compilar el programa**:
+   En la raíz del proyecto, ejecuta el siguiente comando:
+   ```bash
+   make
+   ```
+   Esto generará el ejecutable `os_memory`.
+
+2. **Ejecutar el programa**:
+   Una vez compilado, ejecuta el programa con el siguiente comando:
+   ```bash
+   ./os_memory memorias/memformat.bin
+   ```
+   Asegúrate de tener un archivo de memoria .bin dentro de la carpeta memorias.
+
+
+## Notas Adicionales
+- El archivo `Makefile` está configurado para compilar automáticamente todos los archivos necesarios y generar el ejecutable.
+- Se incluyen múltiples `main` de prueba en la carpeta `src/main_tests/` para validar diferentes funcionalidades. Estos pueden ser probados copiando su contenido al main.c ubicado en la carpeta `src/os_memory/`.
+
