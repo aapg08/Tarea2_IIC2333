@@ -6,7 +6,6 @@
 #include "os_memory_utils.h"
 
 int buscar_pfn_en_IPT(int process_id, int vpn) {
-    printf("entre a la funcion nueva\n");
     FILE* file = fopen(memory_path, "rb+");
     if (!file) {
         printf("Error: No se pudo abrir el archivo de memoria\n");
@@ -25,20 +24,16 @@ int buscar_pfn_en_IPT(int process_id, int vpn) {
             break;
         }
 
-        if (pfn % 1000 == 0) printf("pfn=%u\n", pfn);
-
         int valid = (bytes[0] & 0x80) >> 7; // bit más significativo
         int pid_entry = ((bytes[0] & 0x3F) << 4) | ((bytes[1] & 0xF0) >> 4);
         int vpn_entry = ((bytes[1] & 0x0F) << 9) | bytes[2];
 
         if (valid && pid_entry == process_id && vpn_entry == vpn) {
             fclose(file);
-            printf("sali de la funcion nueva con pfn encontrado\n");
             return pfn; // Encontrado
         }
     }
     fclose(file);
-    printf("sali de la funcion nueva sin pfn encontrado\n");
     return -1; // No encontrado
 }
 

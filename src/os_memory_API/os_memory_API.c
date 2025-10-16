@@ -137,6 +137,18 @@ int start_process(int process_id, char* process_name) {
     nuevo_pcb.id = process_id;
     memset(nuevo_pcb.tabla_archivos, 0x00, 240);  // Inicializar tabla de archivos
 
+    // Verificar si el ID del proceso ya existe
+    for (int i = 0; i < PCB_ENTRIES; i++) {
+        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
+        PCBEntry existing_pcb;
+        fread(&existing_pcb, sizeof(PCBEntry), 1, file);
+        if (existing_pcb.estado == 0x01 && existing_pcb.id == process_id) {
+            printf("Error: El proceso con ID %d ya existe.\n", process_id);
+            fclose(file);
+            return -1; // Caso Error: ID duplicado
+        }
+    }
+
     // Agregar el PCB a la tabla de PCBs en la memoria montada
     for (int i=0; i<PCB_ENTRIES; i++) {
         // fseek(FILE *stream, long offset, int origin); 
@@ -223,7 +235,7 @@ int finish_process(int process_id) {
     }
 
     fclose(file);
-    return 0; // Caso Error
+    return 0;
 }
 
 int clear_all_processes() {
@@ -354,6 +366,14 @@ osmFile* open_file(int process_id, char* file_name, char mode) {
                 fread(&(of->virtual_addr), 4, 1, file);
                 of->process_id = process_id;
                 of->mode = mode;
+                
+                // Validar que el tamaño leído no exceda el límite de 40 bits
+                if (of->size > ((1ULL << 40) - 1)) {
+                    printf("Error: Tamaño del archivo excede el límite permitido (40 bits)\n");
+                    fclose(file);
+                    return NULL; // Archivo inválido
+                }
+
                 fclose(file);
                 return of;
             }
@@ -446,64 +466,13 @@ int write_file(osmFile* file_desc, char* src) {
     FILE* file = fopen(memory_path, "rb+");
     uint32_t vaddr = file_desc->virtual_addr;
     uint64_t size = file_desc->size;
-    printf("size %lu\n", size);
     int pid = file_desc->process_id;
     size_t total_escritos = 0;
 
     while (total_escritos < size) {
-        // Verificar espacio virtual contiguo libre
-        int pcb_index = -1;
-        PCBEntry pcb;
-        for (int i = 0; i < PCB_ENTRIES; i++) {
-            fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
-            fread(&pcb, sizeof(PCBEntry), 1, file);
-            if (pcb.estado == 0x01 && pcb.id == pid) {
-                pcb_index = i;
-                break;
-            }
-        }
-        printf("pcb_index=%d\n", pcb_index);
-        int solapado = 0;
-        for (int j = 0; j < FILE_TABLE_ENTRIES; j++) {
-            int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24;
-            fseek(file, entry_offset, SEEK_SET);
-            uint8_t valid;
-            char name[15];
-            fread(&valid, 1, 1, file);
-            fread(name, 1, 14, file);
-            name[14] = '\0';
-            uint64_t other_size;
-            uint32_t other_vaddr;
-            fread(&other_size, 5, 1, file);
-            fread(&other_vaddr, 4, 1, file);
-            if (valid == 0x01 && strncmp(name, file_desc->name, 14) != 0) {
-                uint32_t start = other_vaddr;
-                uint32_t end = other_vaddr + (uint32_t)other_size;
-                uint32_t this_start = vaddr;
-                uint32_t this_end = vaddr + (size - total_escritos);
-                if (!(this_end <= start || this_start >= end)) {
-                    // Hay solapamiento
-                    printf("Solapamiento detectado: otro archivo [%s] ocupa vaddr %u-%u\n", name, start, end);
-                    solapado = 1;
-                    // Limitar la escritura hasta el inicio del archivo siguiente
-                    size_t max_escribir = start > this_start ? start - this_start : 0;
-                    printf("max_escribir=%zu\n", max_escribir);
-                    if (max_escribir == 0) {
-                        fclose(file);
-                        return (int)total_escritos;
-                    }
-                    size = total_escritos + max_escribir;
-                    break;
-                }
-            }
-        }
-
-        printf("write_file: total_escritos=%zu, size=%lu, vaddr=%u\n", total_escritos, size, vaddr);
-        printf("hasta acá\n");
         uint32_t vpn = (vaddr >> 15) & 0xFFF; // 12 bits de VPN
         uint32_t offset = vaddr % PAGE_SIZE; // 15 bits de offset
         int pfn = buscar_pfn_en_IPT(pid, vpn);
-        printf("salto\n");
 
         // Si no existe la página, asignar un frame libre
         if (pfn < 0) {
@@ -550,40 +519,9 @@ int write_file(osmFile* file_desc, char* src) {
         size_t bytes_restantes = size - total_escritos;
         size_t bytes_a_escribir = (bytes_restantes < bytes_pagina) ? bytes_restantes : bytes_pagina;
 
-        printf("write_file: escribiendo %zu bytes en pfn=%d, vpn=%u, offset=%u, paddr_abs=%ld\n", bytes_a_escribir, pfn, vpn, offset, paddr_abs);
         fwrite(src + total_escritos, 1, bytes_a_escribir, file);
         total_escritos += bytes_a_escribir;
         vaddr += bytes_a_escribir;
-    }
-
-    // Buscar el PCB del proceso
-    int pcb_index = -1;
-    PCBEntry pcb;
-    for (int i = 0; i < PCB_ENTRIES; i++) {
-        fseek(file, PCB_OFFSET + i * PCB_ENTRY_SIZE, SEEK_SET);
-        fread(&pcb, sizeof(PCBEntry), 1, file);
-        if (pcb.estado == 0x01 && pcb.id == pid) {
-            pcb_index = i;
-            break;
-        }
-    }
-    if (pcb_index != -1) {
-        // Buscar la entrada de archivo
-        for (int j = 0; j < FILE_TABLE_ENTRIES; j++) {
-            int entry_offset = PCB_OFFSET + pcb_index * PCB_ENTRY_SIZE + 16 + j * 24;
-            fseek(file, entry_offset, SEEK_SET);
-            uint8_t valid;
-            char name[15];
-            fread(&valid, 1, 1, file);
-            fread(name, 1, 14, file);
-            name[14] = '\0';
-            if (valid == 0x01 && strncmp(name, file_desc->name, 14) == 0) {
-                // Actualizar el tamaño
-                fseek(file, entry_offset + 1 + 14, SEEK_SET); // Salta valid y name
-                fwrite(&total_escritos, 5, 1, file); // Escribe el nuevo tamaño
-                break;
-            }
-        }
     }
 
     fclose(file);
